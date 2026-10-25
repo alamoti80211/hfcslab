@@ -1,0 +1,90 @@
+
+
+%% Simulation Parameters
+Rsamp = 0.1e6;
+Ns = 3e6;
+
+%% Modified SUI-1 MIMO Channel
+wimaxChan = comm.MIMOChannel( ...
+    'SampleRate', Rsamp, ...
+    'PathDelays', [0 0.4 0.9]*1e-6, ...
+    'AveragePathGains', [0 -15 -20], ...
+    'FadingDistribution', 'Rician', ...
+    'KFactor', 4, ...
+    'MaximumDopplerShift', 0.5, ...
+    'DopplerSpectrum', doppler('Rounded'), ...
+    'TransmitCorrelationMatrix', [1 0.7; 0.7 1], ...
+    'ReceiveCorrelationMatrix', 1, ...
+    'PathGainsOutputPort', true);
+
+%% Generate QPSK Signals
+Nt = size(wimaxChan.TransmitCorrelationMatrix,1);
+
+x = pskmod(randi([0 3],Ns,Nt),4);
+
+%% Pass Signal Through Channel
+[~,g] = wimaxChan(x);
+
+%% Theoretical Doppler Spectrum for Path 2
+fd = wimaxChan.MaximumDopplerShift;
+f = -fd:0.01:fd;
+a = wimaxChan.DopplerSpectrum.Polynomial;
+
+Sd = (a(1) + a(2)*(f/fd).^2 + a(3)*(f/fd).^4) ...
+    / (2*fd*(a(1) + a(2)/3 + a(3)/5));
+
+Sd = Sd * 10^(wimaxChan.AveragePathGains(2)/10);
+
+%% Doppler Spectrum Plots for Both Transmit Links
+win = hamming(Ns/5);
+Noverlap = Ns/10;
+
+for link = 1:2
+    figure;
+
+    pwelch(g(:,2,link),win,Noverlap,[],Rsamp,'centered');
+    hold on;
+
+    plot(f(Sd>0),10*log10(Sd(Sd>0)),'k--');
+
+    axis([-0.6 0.6 -80 10]);
+    xlabel('Doppler Frequency (Hz)');
+    ylabel('PSD (dB/Hz)');
+    title(sprintf('Doppler Spectrum - Path 2, Link %d',link));
+    legend('Simulation','Theory');
+    grid on;
+end
+
+%% Fading Envelope Plots for All Three Paths
+for path = 1:3
+    figure;
+
+    semilogy(abs(g(:,path,1)),'b');
+    hold on;
+    semilogy(abs(g(:,path,2)),'r');
+
+    xlabel('Sample Index');
+    ylabel('Fading Amplitude');
+    title(sprintf('Fading Envelopes - Path %d',path));
+    legend('Transmit Link 1','Transmit Link 2');
+    grid on;
+end
+
+%% Calculate and Display Transmit Correlation
+fprintf('\nTransmit Correlation Estimates\n');
+fprintf('----------------------------------\n');
+
+for path = 1:3
+    x1 = g(:,path,1);
+    x2 = g(:,path,2);
+
+    x1 = x1 - mean(x1);
+    x2 = x2 - mean(x2);
+
+    rho = abs(sum(x1.*conj(x2))) / ...
+        sqrt(sum(abs(x1).^2)*sum(abs(x2).^2));
+
+    fprintf('Path %d: %.4f\n',path,rho);
+end
+
+fprintf('Specified transmit correlation: 0.7\n');
