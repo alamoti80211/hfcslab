@@ -1,0 +1,91 @@
+%clc;clear;close all;
+Nt=2;
+Nr=2;
+modord=2;
+M=4;
+Ebnovec=-10:5:20;
+stream=RandStream('mt19937ar');
+allbits=de2bi(0:15,4,'left-msb').';
+alltxsig=reshape(pskmod(allbits,M,0,'gray','InputType','bit'),Nt,[]);
+ber_zf=zeros(length(Ebnovec),1);
+ber_mmse=zeros(length(Ebnovec),1);
+ber_ml=zeros(length(Ebnovec),1);
+max_bit=1e5;
+max_error=100;
+figure;
+hold on;
+grid on;
+set(gca,'YScale','log');
+xlabel("EbNo");
+ylabel("BER");
+ylim([1e-04 1]);
+for idx=1:length(Ebnovec)
+    snr_db=Ebnovec(idx)+10*log10(modord);
+    snr_linear=10^(snr_db/10);
+    totalbits=0;
+    err_zf=0;
+    err_mmse=0;
+    err_ml=0;
+    while(totalbits<max_bit && (err_zf<max_error||err_ml<max_error||err_mmse<max_error))
+        msg=randi(stream,[0 1],Nt*modord,1);
+        txsig=pskmod(msg,M,0,'gray','InputType','bit');
+        H=(randn(stream,Nr,Nt)+1i*(randn(stream,Nr,Nt)))/sqrt(2);
+        rxsig=awgn(H*txsig,snr_db,'measured',stream);
+
+        r=rxsig;
+        Htemp=H;
+        estzf=zeros(Nt*modord,1);
+        ordvec=1:Nt;
+        for n=1:Nt
+            G=(Htemp'*Htemp)\eye(size(Htemp,2));
+            [~,k]=min(diag(G));
+            symnum=ordvec(k);
+            detected=G(k,:)*Htemp'*r;
+            bit=pskdemod(detected,M,0,'gray','OutputType','bit');
+            estzf((symnum-1)*modord+1:symnum*modord)=bit;
+            if n<Nt
+                r=r-Htemp(:,k)*pskmod(bit,M,0,'gray','InputType','bit');
+            end
+            Htemp(:,k)=[];
+            ordvec(k)=[];
+        end
+        r=rxsig;
+        Htemp=H;
+        estmmse=zeros(Nt*modord,1);
+        ordvec=1:Nt;
+
+        for n=1:Nt
+            G=(Htemp'*Htemp+(size(Htemp,2)/snr_linear)*eye(size(Htemp,2)))\eye(size(Htemp,2));
+            [~,k]=min(diag(G));
+            symnum=ordvec(k);
+            detected=G(k,:)*Htemp'*r;
+            bit=pskdemod(detected,M,0,'gray','OutputType','bit');
+            estmmse((symnum-1)*modord+1:symnum*modord)=bit;
+            if n<Nt
+                r=r-Htemp(:,k)*pskmod(bit,M,0,'gray','InputType','bit');
+            end
+            Htemp(:,k)=[];
+            ordvec(k)=[];
+        end
+
+        metric=sum(abs(rxsig-H*alltxsig).^2,1);
+        [~,k]=min(metric);
+        estml=allbits(:,k);
+        err_zf=err_zf+biterr(msg,estzf);
+        err_mmse=err_mmse+biterr(msg,estmmse);
+        err_ml=err_ml+biterr(msg,estml);
+        totalbits=totalbits+length(msg);
+    end
+    ber_zf(idx)=err_zf/totalbits;
+    ber_mmse(idx)=err_mmse/totalbits;
+    ber_ml(idx)=err_ml/totalbits;
+    
+end
+
+semilogy(Ebnovec,ber_zf,'r--');
+semilogy(Ebnovec,ber_mmse,'g--');
+semilogy(Ebnovec,ber_ml,'b--');
+
+    
+
+            
